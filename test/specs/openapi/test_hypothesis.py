@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from hypothesis import assume, given, settings
 
@@ -116,5 +118,24 @@ def test_inlined_definitions(deeply_nested_schema):
     def test(case):
         # Then the referenced schema should be properly transformed to the JSON Schema form
         assume(case.query["key"] is None)
+
+    test()
+
+
+def test_inline_remote_refs(testdir, deeply_nested_schema):
+    # See GH-986
+    # When not resolved references are present in the schema during constructing a strategy
+    # And the referenced schema is remote
+    testdir.makefile(".json", bar='{"bar": {"type": "integer"}}')
+    deeply_nested_schema["components"]["schemas"]["foo6"] = {"$ref": "bar.json#/bar"}
+
+    schema = schemathesis.from_dict(deeply_nested_schema)
+
+    @given(schema["/data"]["GET"].as_strategy())
+    @settings(max_examples=1)
+    def test(case):
+        # Then the referenced schema should be accessible by `hypothesis-jsonschema` and the right value should be
+        # generated
+        assert isinstance(case.query["key"], int)
 
     test()

@@ -4,6 +4,7 @@ from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from difflib import get_close_matches
+from hashlib import sha1
 from json import JSONDecodeError
 from typing import Any, Callable, ClassVar, Dict, Generator, Iterable, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlsplit
@@ -24,10 +25,10 @@ from ...models import APIOperation, Case, OperationDefinition
 from ...schemas import BaseSchema
 from ...stateful import APIStateMachine, Stateful, StatefulTest
 from ...types import FormData
-from ...utils import Err, GenericResponse, Ok, Result, get_response_payload, is_json_media_type
+from ...utils import Err, GenericResponse, Ok, Result, get_response_payload, is_json_media_type, traverse_schema
 from . import links, serialization
 from ._hypothesis import get_case_strategy
-from .converter import to_json_schema_recursive
+from .converter import to_json_schema, to_json_schema_recursive
 from .examples import get_strategies_from_examples
 from .filters import (
     should_skip_by_operation_id,
@@ -60,6 +61,7 @@ class BaseOpenAPISchema(BaseSchema):
     parameter_cls: Type[OpenAPIParameter]
     component_locations: ClassVar[Tuple[str, ...]] = ()
     _operations_by_id: Dict[str, APIOperation]
+    _remote_reference_cache: Dict[str, Any]
 
     @property  # pragma: no mutate
     def spec_version(self) -> str:
@@ -413,12 +415,39 @@ class BaseOpenAPISchema(BaseSchema):
 
         Inlining components helps `hypothesis-jsonschema` generate data that involves non-resolved references.
         """
+        if not hasattr(self, "_remote_reference_cache"):
+            self._remote_reference_cache = {}
         schema = deepcopy(schema)
+        schema = traverse_schema(schema, self._rewrite_remote_references)
+
+        def callback(_schema: Dict[str, Any], nullable_name: str) -> Dict[str, Any]:
+            _schema = to_json_schema(_schema, nullable_name)
+            return self._rewrite_remote_references(_schema)
+
         # Different spec versions allow different keywords to store possible reference targets
         for key in self.component_locations:
             if key in self.raw_schema:
-                schema[key] = to_json_schema_recursive(self.raw_schema[key], self.nullable_name)
+                schema[key] = traverse_schema(self.raw_schema[key], callback, self.nullable_name)
+        if self._remote_reference_cache:
+            schema[REMOTE_SCHEMAS_STORAGE_KEY] = self._remote_reference_cache
         return schema
+
+    def _rewrite_remote_references(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        if "$ref" in schema:
+            reference = schema["$ref"]
+            # `$ref` could be a property name
+            if isinstance(reference, str) and not reference.startswith("#/"):
+                key = sha1(reference.encode("utf-8")).hexdigest()
+                if reference not in self._remote_reference_cache:
+                    # TODO:
+                    #   - locking
+                    #   - proper scope
+                    self._remote_reference_cache[key] = self.resolver.resolve(reference)[1]
+                schema["$ref"] = f"#/{REMOTE_SCHEMAS_STORAGE_KEY}/{key}"
+        return schema
+
+
+REMOTE_SCHEMAS_STORAGE_KEY = "x-inlined"
 
 
 @contextmanager

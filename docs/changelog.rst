@@ -4,6 +4,10 @@ Changelog
 `Unreleased`_ - TBD
 -------------------
 
+**Fixed**
+
+- Rewrite not resolved remote references to local ones. `#986`_
+
 `3.6.9`_ - 2021-05-14
 ---------------------
 
@@ -1923,6 +1927,7 @@ Deprecated
 .. _#992: https://github.com/schemathesis/schemathesis/issues/992
 .. _#990: https://github.com/schemathesis/schemathesis/issues/990
 .. _#987: https://github.com/schemathesis/schemathesis/issues/987
+.. _#986: https://github.com/schemathesis/schemathesis/issues/986
 .. _#982: https://github.com/schemathesis/schemathesis/issues/982
 .. _#980: https://github.com/schemathesis/schemathesis/issues/980
 .. _#975: https://github.com/schemathesis/schemathesis/issues/975
